@@ -1,6 +1,6 @@
-"""
-board.py
+# board.py
 
+"""
 Moduł zawierający klasę Board, która odpowiada za logikę planszy gry „Statki”:
 - przechowuje stan pól (woda, statek, trafienie, pudło),
 - umożliwia umieszczanie statków,
@@ -8,8 +8,7 @@ Moduł zawierający klasę Board, która odpowiada za logikę planszy gry „Sta
 - sprawdza, czy wszystkie statki zostały zatopione.
 """
 
-BOARD_SIZE = 10  # Standardowy rozmiar planszy: 10×10
-
+BOARD_SIZE = 10
 
 class Board:
     """
@@ -23,13 +22,20 @@ class Board:
             'S' – fragment statku,
             'X' – trafione (fragment statku zmieniony z 'S'),
             'O' – pudło (strzał w wodę zmieniony z '~').
+    ships : list[dict]
+        Lista słowników opisujących każdy umieszczony statek:
+            {
+                "cells": [(r1, c1), (r2, c2), ...],  # wszystkie współrzędne statku
+                "hits": set()                        # trafione fragmenty tego statku
+            }
     """
 
     def __init__(self):
         """
-        Inicjalizuje nową planszę, wypełnioną wodą ('~').
+        Inicjalizuje nową planszę, wypełnioną wodą ('~') i pustą listę statków.
         """
         self.grid = [["~"] * BOARD_SIZE for _ in range(BOARD_SIZE)]
+        self.ships = []  # Lista słowników opisujących każdy statek
 
     def can_place(self, row, col, length, orient):
         """
@@ -54,18 +60,14 @@ class Board:
             False – w przeciwnym razie.
         """
         if orient == "H":
-            # Sprawdzamy, czy statek nie wyjdzie poza planszę w poziomie
             if col + length > BOARD_SIZE:
                 return False
-            # Sprawdzamy nakładanie się na inne statki
             for c in range(col, col + length):
                 if self.grid[row][c] == "S":
                     return False
         else:  # orientacja "V"
-            # Sprawdzamy, czy statek nie wyjdzie poza planszę w pionie
             if row + length > BOARD_SIZE:
                 return False
-            # Sprawdzamy nakładanie się na inne statki
             for r in range(row, row + length):
                 if self.grid[r][col] == "S":
                     return False
@@ -73,7 +75,7 @@ class Board:
 
     def place_ship(self, row, col, length, orient):
         """
-        Umieszcza statek na planszy, oznaczając pola jako 'S'.
+        Umieszcza statek na planszy, oznaczając pola jako 'S' i rejestruje go w self.ships.
 
         Parametry:
         ----------
@@ -86,12 +88,20 @@ class Board:
         orient : str
             'H' – poziomo; 'V' – pionowo.
         """
+        cells = []
         if orient == "H":
             for c in range(col, col + length):
                 self.grid[row][c] = "S"
+                cells.append((row, c))
         else:  # orientacja "V"
             for r in range(row, row + length):
                 self.grid[r][col] = "S"
+                cells.append((r, col))
+
+        self.ships.append({
+            "cells": cells,
+            "hits": set()
+        })
 
     def receive_attack(self, row, col):
         """
@@ -106,26 +116,40 @@ class Board:
 
         Zwraca:
         --------
-        True, jeśli trafił w fragment statku ('S'),
-        False, jeśli chybił (pole było wody '~'),
-        None, jeśli w to pole już wcześniej strzelano ('X' lub 'O').
+        (hit, sunk) : tuple
+            hit : bool lub None
+                True  – trafienie w statek,
+                False – pudło,
+                None  – w to pole już wcześniej strzelano.
+            sunk : bool
+                True  – jeśli trafienie zatopiło cały dany statek,
+                False – w przeciwnym razie.
         """
         cell = self.grid[row][col]
+        # 1) Sprawdzamy, czy w to pole już wcześniej strzelano
+        if cell in ("X", "O"):
+            return None, False
+
+        # 2) Trafienie w statek
         if cell == "S":
-            # Trafienie w statek
             self.grid[row][col] = "X"
-            return True
-        elif cell == "~":
-            # Pudło (strzał w wodę)
+            for ship in self.ships:
+                if (row, col) in ship["cells"]:
+                    ship["hits"].add((row, col))
+                    sunk = set(ship["cells"]) == ship["hits"]
+                    return True, sunk
+            return True, False
+
+        # 3) Pudło
+        if cell == "~":
             self.grid[row][col] = "O"
-            return False
-        else:
-            # Już wcześniej strzelano w to pole
-            return None
+            return False, False
+
+        return None, False
 
     def all_sunk(self):
         """
-        Sprawdza, czy wszystkie fragmenty statków zostały trafione (czy nie ma już 'S').
+        Sprawdza, czy wszystkie fragmenty statków zostały trafione (czy żaden 'S' nie pozostał).
 
         Zwraca:
         --------

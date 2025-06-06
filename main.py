@@ -1,6 +1,6 @@
-"""
-main.py
+# main.py
 
+"""
 Główna część aplikacji, która integruje moduły:
 - board.py  → logika planszy,
 - network.py → komunikacja TCP w trybie host/klient,
@@ -13,11 +13,14 @@ Schemat działania:
 4. Po obu komunikatach "ready" przechodzimy bezpośrednio do fazy "game" → rozgrywka on-line:
    - Host (gracz 1) atakuje pierwszy, klient czeka.
    - Strzał to wysłanie {"type":"attack","row":r,"col":c}.
-   - Przeciwnik odbiera, wywołuje receive_attack(), odsyła {"type":"result","hit":..., "gameover":...}.
+   - Przeciwnik odbiera, wywołuje receive_attack() dla własnej planszy → zwraca (hit, sunk).
+   - Na tej podstawie odtwarzamy dźwięk trafienia/pudła/zatopienia statku → odsyłamy {"type":"result","hit":..., "sunk":..., "gameover":...}.
+   - W tle leci muzyka.
    - Zwycięzca/przegrany zobaczy odpowiedni komunikat, a gra zakończy się.
 """
 
 import pygame
+import pygame.mixer
 import sys
 from board import Board
 from network import send_json, try_receive_from_buffer, init_network
@@ -60,6 +63,16 @@ def main():
     - Po zakończeniu (zwycięstwo/przegrana) zamyka socket i kończy działanie Pygame.
     """
     pygame.init()
+    pygame.mixer.init()
+
+    pygame.mixer.music.load("sounds/bg_music.mp3")
+    pygame.mixer.music.set_volume(0.0)
+    pygame.mixer.music.play(-1)
+
+    miss_sound = pygame.mixer.Sound("sounds/miss.mp3")
+    hit_sound  = pygame.mixer.Sound("sounds/hit.mp3")
+    sink_sound = pygame.mixer.Sound("sounds/sink.mp3")
+
     screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
     pygame.display.set_caption("Statki Sieciowe (Pygame)")
     clock = pygame.time.Clock()
@@ -81,15 +94,14 @@ def main():
     current_phase = "placement"     # Początkowo obie strony w fazie ustawiania
     orientation = "H"               # Domyślna orientacja statku: poziomo
     ship_index = 0                  # Indeks pierwszego statku do ustawienia
-    my_turn = False                 # W fazie 'game' host zacznie ture, więc ustawimy niżej
+    my_turn = False                 # W fazie 'game' host zacznie turę, więc ustawimy niżej
     ready_received = False          # Czy otrzymaliśmy {"type":"ready"} od przeciwnika
     net_buffer = ""                 # Bufor do odczytu JSON
 
-    # Nawiązanie połączenia sieciowego
     connection_sock, my_player, is_host = init_network()
 
-    # Właśnie po połączeniu: jeśli jesteśmy hostem, to host (gracz 1) zaczyna w 'game'
-    my_turn = False  # W tej chwili jesteśmy w fazie 'placement'; ustawimy w 'waiting_opponent'
+
+    my_turn = False
 
     running = True
     while running:
@@ -110,29 +122,39 @@ def main():
                     """
                     Obserwujemy ruch przeciwnika:
                     - Otrzymaliśmy r, c → wykonujemy receive_attack() dla własnej planszy.
-                    - Sprawdzamy, czy przegrałem (wszystkie statki trafione).
-                    - Odsylamy {"type":"result", "hit":..., "gameover":...}.
-                    - Jeśli przegrałem, wyświetlam wieloliniowy komunikat przegranego i kończymy.
-                    - W przeciwnym razie, dajemy turę sobie (my_turn = True).
+                    - Sprawdzamy, czy dany statek został zatopiony (sunk) oraz czy cała flota przegrała (all_sunk).
+                    - Odsylamy reply: {"type":"result", "row":r, "col":c, "hit":..., "sunk":..., "gameover":...}.
+                    - Jeśli przegrałem całą flotę, wyświetlam komunikat przegranego i kończymy.
+                    - W przeciwnym razie, my_turn = True.
                     """
                     r = msg["row"]
                     c = msg["col"]
-                    res = player_boards[my_player].receive_attack(r, c)
+                    res, sunk = player_boards[my_player].receive_attack(r, c)
                     lost = False
+
                     if res and player_boards[my_player].all_sunk():
                         lost = True
+
+                    if res is True:
+                        if sunk:
+                            sink_sound.play()
+                        else:
+                            hit_sound.play()
+                    elif res is False:
+                        miss_sound.play()
 
                     reply = {
                         "type": "result",
                         "row": r,
                         "col": c,
+                        # jeśli res jest None, to zwracamy False
                         "hit": False if res is None else res,
+                        "sunk": True if sunk else False,
                         "gameover": lost
                     }
                     send_json(connection_sock, reply)
 
                     if lost:
-                        # Komunikat przegranego – wieloliniowy
                         screen.fill(COLOR_BG)
                         lose_lines = [
                             f"Player {my_player} przegrał!",
@@ -157,22 +179,30 @@ def main():
                 elif msg["type"] == "result":
                     """
                     Odpowiedź na mój atak:
-                    - Aktualizujemy guess_boards: X jeśli trafienie, O jeśli pudło.
-                    - Jeśli 'gameover' == True, wyświetlamy wieloliniowy komunikat zwycięzcy:
-                        "Player X wygrał!", "Gratulacje!".
-                    - Kończymy po 3s. W przeciwnym razie: my_turn = False.
+                    - msg["hit"] → prawda/fałsz, msg["sunk"] → czy mój atak zatopił cały okręt,
+                      msg["gameover"] → czy cała flota przeciwnika właśnie przegrała.
+                    - Aktualizujemy guess_boards: 'X' jeśli trafienie, 'O' jeśli pudło.
+                    - Odtwarzamy odpowiedni dźwięk (hit/miss/sink).
+                    - Jeśli gameover == True → wyświetlamy komunikat zwycięzcy i kończymy.
+                    - W przeciwnym razie: my_turn = False.
                     """
                     r = msg["row"]
                     c = msg["col"]
-                    hit = msg["hit"]
+                    hit = msg.get("hit", False)
+                    sunk = msg.get("sunk", False)
                     gameov = msg.get("gameover", False)
+
                     if hit:
+                        if sunk:
+                            sink_sound.play()
+                        else:
+                            hit_sound.play()
                         guess_boards[my_player][r][c] = "X"
                     else:
+                        miss_sound.play()
                         guess_boards[my_player][r][c] = "O"
 
                     if gameov:
-                        # Komunikat zwycięzcy – wieloliniowy
                         screen.fill(COLOR_BG)
                         win_lines = [
                             f"Player {my_player} wygrał!",
@@ -211,7 +241,6 @@ def main():
                 highlight_cell=None
             )
 
-            # Podgląd kształtu statku dla bieżącego ship_index
             r_h, c_h = get_cell_coords((mx, my), left_top)
             if r_h is not None and ship_index < len(SHIPS):
                 highlight = (r_h, c_h)
@@ -271,15 +300,14 @@ def main():
                 if msg.get("type") == "ready":
                     ready_received = True
 
-            # Gdy obaj są gotowi → przechodzimy od razu do "game"
             if ready_received:
                 current_phase = "game"
-                my_turn = is_host  # host zaczyna jako pierwszy
+                my_turn = is_host
 
-            continue  # pomijamy obsługę eventów w tej klatce
+            continue
 
         # 3) FAZA "game" – rysujemy obie plansze
-        else:  # current_phase == "game"
+        else:
             draw_grid(
                 screen,
                 left_top,
@@ -344,7 +372,8 @@ def main():
 
         pygame.display.flip()
 
-    # Po zakończeniu gry zamykamy socket i kończymy Pygame
+    # Po zakończeniu gry zatrzymujemy muzykę, zamykamy socket i kończymy Pygame
+    pygame.mixer.music.stop()
     try:
         connection_sock.close()
     except:

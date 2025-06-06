@@ -10,15 +10,17 @@ Moduł zawierający funkcje rysujące planszę oraz interfejs gry w Pygame:
 import pygame
 
 # Stałe odpowiadające kolorom w formacie RGB
-COLOR_BG        = (30, 10, 40)    # ciemny fioletoworóżowy jako tło całego okna
-COLOR_GRID_BG   = (50, 20, 60)    # ciemniejszy fiolet na obramowania siatki i dolny pasek
-COLOR_WATER     = (255, 200, 230) # pastelowy jasnoróżowy na pola wody
-COLOR_SHIP      = (200, 100, 150) # średni róż na fragmenty statków
-COLOR_HIT       = (255, 100, 180) # intensywny róż na trafienia
-COLOR_MISS      = (255, 220, 240) # bardzo jasny róż na pudła
-COLOR_TEXT      = (250, 250, 255) # niemal biały, lekko różowawy na tekst
-COLOR_HIGHLIGHT = (255, 150, 200) # jasny róż na obwódkę pola podświetlonego
-COLOR_INVALID   = (255, 50, 120)  # mocny róż-puźnia na nieprawidłowe podświetlenie
+COLOR_BG        = (0, 0, 0)       # absolutna czerń dla maksymalnego kontrastu
+COLOR_GRID_BG   = (50, 0, 100)    # głęboki fiolet dla wyraźnego rozdzielenia od tła
+COLOR_WATER     = (255, 255, 255) # czysta biel dla maksymalnej widoczności pól wody
+COLOR_SHIP      = (255, 0, 0)     # intensywna czerwień dla wyraźnego wyróżnienia statków
+COLOR_HIT       = (255, 255, 0)   # jaskrawa żółć dla mocnego akcentu trafienia
+COLOR_MISS      = (0, 255, 255)   # cyjan dla odróżnienia pudeł od reszty
+COLOR_TEXT      = (255, 255, 255) # biel dla najwyższej czytelności tekstu
+COLOR_HIGHLIGHT = (255, 165, 0)   # mocny pomarańczowy podświetlenia
+COLOR_INVALID   = (255, 0, 255)   # neonowy magenta na błędy
+
+
 
 # Wymiary interfejsu
 BOARD_SIZE     = 10    # plansza 10×10
